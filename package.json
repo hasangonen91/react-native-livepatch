@@ -1,0 +1,57 @@
+{
+  "name": "react-native-livepatch",
+  "version": "0.2.0",
+  "description": "Free, self-hosted OTA updates for React Native. Push JS bundle updates instantly. CodePush alternative.",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "bin": {
+    "livepatch": "./bin/livepatch.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "tsc",
+    "test": "node --test tests/**/*.test.js"
+  },
+  "keywords": [
+    "react-native",
+    "ota",
+    "over-the-air",
+    "hot-update",
+    "code-push",
+    "codepush",
+    "codepush-alternative",
+    "live-update",
+    "live-patch",
+    "bundle-update",
+    "self-hosted",
+    "free",
+    "no-cloud",
+    "react-native-plugin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hasangonen91/react-native-livepatch.git"
+  },
+  "homepage": "https://github.com/hasangonen91/react-native-livepatch#readme",
+  "bugs": {
+    "url": "https://github.com/hasangonen91/react-native-livepatch/issues"
+  },
+  "author": "hasangonen91",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.70.0"
+  },
+  "devDependencies": {
+    "@types/react-native": "^0.73.0",
+    "typescript": "^5.9.3"
+  },
+  "files": [
+    "lib/",
+    "bin/",
+    "src/",
+    "android/",
+    "ios/",
+    "react-native-livepatch.podspec"
+  ]
+}

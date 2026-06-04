@@ -1,0 +1,8 @@
+tests/
+.livepatch-output/
+.livepatch-history.json
+*.log
+.DS_Store
+.git/
+src/
+tsconfig.json
