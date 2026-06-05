@@ -27,6 +27,7 @@ function parseArgs(argv) {
     server: null,
     platform: 'all',
     port: 4200,
+    upload: null, // 'github', 'vercel', or URL
   };
 
   for (let i = 1; i < args.length; i++) {
@@ -40,6 +41,8 @@ function parseArgs(argv) {
       options.platform = args[++i];
     } else if (args[i] === '--port' && args[i + 1]) {
       options.port = parseInt(args[++i], 10);
+    } else if (args[i] === '--upload' && args[i + 1]) {
+      options.upload = args[++i];
     }
   }
 
@@ -105,30 +108,32 @@ async function pushUpdate(options) {
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   console.log(`  ${c.green}✔${c.reset}  manifest.json`);
 
-  // Step 4: Save to history
+  // Step 4: Upload or output
   saveHistory(manifest);
 
-  // Output
-  console.log(`  ${c.bold}[4/4]${c.reset} Done`);
-  console.log('');
-  console.log(`  ${c.green}${c.bold}✔ Update ready!${c.reset}`);
-  console.log(`  ${c.dim}Version:  ${manifest.version}${c.reset}`);
-  console.log(`  ${c.dim}Channel:  ${manifest.channel}${c.reset}`);
-  console.log(`  ${c.dim}Output:   ${outputDir}${c.reset}`);
-  console.log('');
-
-  if (options.server) {
-    console.log(`  ${c.dim}Uploading to ${options.server}...${c.reset}`);
-    // TODO: HTTP upload
-    console.log(`  ${c.green}✔${c.reset}  Uploaded`);
+  if (options.upload === 'github') {
+    console.log(`  ${c.bold}[4/4]${c.reset} Uploading to GitHub Releases...`);
+    await uploadToGitHub(manifest, outputDir);
+  } else if (options.upload === 'vercel') {
+    console.log(`  ${c.bold}[4/4]${c.reset} Deploying to Vercel...`);
+    await uploadToVercel(outputDir);
+  } else if (options.upload) {
+    console.log(`  ${c.bold}[4/4]${c.reset} Uploading to ${options.upload}...`);
+    await uploadToCustomServer(options.upload, outputDir, manifest);
   } else {
-    console.log(`  ${c.bold}Next:${c.reset} Serve locally for testing:`);
-    console.log(`    ${c.cyan}npx livepatch serve${c.reset}`);
+    console.log(`  ${c.bold}[4/4]${c.reset} Done`);
     console.log('');
-    console.log(`  ${c.bold}Or upload to hosting:${c.reset}`);
-    console.log(`    ${c.dim}• GitHub Releases: gh release create v${manifest.version} ${outputDir}/*${c.reset}`);
-    console.log(`    ${c.dim}• S3: aws s3 sync ${outputDir} s3://bucket/updates/${options.channel}/${c.reset}`);
-    console.log(`    ${c.dim}• Vercel/Netlify: deploy the folder as static site${c.reset}`);
+    console.log(`  ${c.green}${c.bold}✔ Update ready!${c.reset}`);
+    console.log(`  ${c.dim}Version:  ${manifest.version}${c.reset}`);
+    console.log(`  ${c.dim}Channel:  ${manifest.channel}${c.reset}`);
+    console.log(`  ${c.dim}Output:   ${outputDir}${c.reset}`);
+    console.log('');
+    console.log(`  ${c.bold}Next:${c.reset} Upload to production:`);
+    console.log(`    ${c.cyan}livepatch push --upload github${c.reset}     ${c.dim}(GitHub Releases — free)${c.reset}`);
+    console.log(`    ${c.cyan}livepatch push --upload vercel${c.reset}     ${c.dim}(Vercel — free)${c.reset}`);
+    console.log('');
+    console.log(`  ${c.bold}Or serve locally:${c.reset}`);
+    console.log(`    ${c.cyan}livepatch serve${c.reset}`);
   }
   console.log('');
 }
@@ -181,29 +186,197 @@ function showHistory() {
   console.log('');
 }
 
+async function uploadToGitHub(manifest, outputDir) {
+  // Check gh CLI
+  try {
+    execSync('gh --version', { stdio: 'pipe' });
+  } catch {
+    console.error(`  ${c.red}✖${c.reset}  GitHub CLI (gh) not installed. Install: brew install gh`);
+    process.exit(1);
+  }
+
+  try {
+    execSync('gh auth status', { stdio: 'pipe' });
+  } catch {
+    console.error(`  ${c.red}✖${c.reset}  Not logged in. Run: gh auth login`);
+    process.exit(1);
+  }
+
+  const tag = `v${manifest.version}`;
+  const title = `Update ${manifest.version} (${manifest.channel})`;
+  const notes = `Channel: ${manifest.channel}\nPlatforms: ${Object.keys(manifest.bundles).join(', ')}\nTimestamp: ${manifest.timestamp}`;
+
+  // Collect files to upload
+  const files = [];
+  files.push(path.join(outputDir, 'manifest.json'));
+  for (const platform of Object.keys(manifest.bundles)) {
+    files.push(path.join(outputDir, manifest.bundles[platform].filename));
+  }
+
+  const fileArgs = files.map(f => `"${f}"`).join(' ');
+
+  try {
+    execSync(`gh release create "${tag}" ${fileArgs} --title "${title}" --notes "${notes}"`, {
+      stdio: 'pipe',
+      encoding: 'utf8',
+      timeout: 60000,
+    });
+
+    // Get the release URL
+    const releaseUrl = execSync(`gh release view "${tag}" --json url -q .url`, {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    }).trim();
+
+    // Get the repo info for download URL
+    const repoUrl = execSync('gh repo view --json url -q .url', {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    }).trim();
+
+    // Construct download base URL
+    const repoMatch = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+    let downloadBase = '';
+    if (repoMatch) {
+      downloadBase = `https://github.com/${repoMatch[1]}/${repoMatch[2]}/releases/download/${tag}`;
+    }
+
+    console.log(`  ${c.green}✔${c.reset}  Release created: ${c.cyan}${releaseUrl}${c.reset}`);
+    console.log('');
+    console.log(`  ${c.green}${c.bold}✔ Update published!${c.reset}`);
+    console.log(`  ${c.dim}Version: ${manifest.version}${c.reset}`);
+    console.log(`  ${c.dim}Channel: ${manifest.channel}${c.reset}`);
+    console.log('');
+    console.log(`  ${c.bold}Configure your app with:${c.reset}`);
+    console.log(`  ${c.dim}LivePatch.configure({${c.reset}`);
+    console.log(`  ${c.dim}  updateUrl: '${downloadBase}'${c.reset}`);
+    console.log(`  ${c.dim}});${c.reset}`);
+    console.log('');
+
+    // Save config for future pushes
+    const configPath = path.resolve('.livepatch.json');
+    const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+    config.github = { downloadBase, tag };
+    config.updateUrl = downloadBase;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+  } catch (err) {
+    const msg = err.stderr || err.message || '';
+    if (msg.includes('already exists')) {
+      console.log(`  ${c.yellow}⚠${c.reset}  Release ${tag} already exists. Deleting and recreating...`);
+      try {
+        execSync(`gh release delete "${tag}" --yes`, { stdio: 'pipe' });
+        execSync(`gh release create "${tag}" ${fileArgs} --title "${title}" --notes "${notes}"`, { stdio: 'pipe' });
+        console.log(`  ${c.green}✔${c.reset}  Release recreated`);
+      } catch (e2) {
+        console.error(`  ${c.red}✖${c.reset}  Failed: ${e2.message}`);
+        process.exit(1);
+      }
+    } else {
+      console.error(`  ${c.red}✖${c.reset}  GitHub upload failed: ${msg.split('\n')[0]}`);
+      process.exit(1);
+    }
+  }
+}
+
+async function uploadToVercel(outputDir) {
+  // Check if vercel CLI is available
+  try {
+    execSync('npx vercel --version', { stdio: 'pipe' });
+  } catch {
+    console.error(`  ${c.red}✖${c.reset}  Vercel CLI not found. Install: npm i -g vercel`);
+    process.exit(1);
+  }
+
+  try {
+    // Deploy the output directory as a static site
+    const result = execSync(`npx vercel "${outputDir}" --prod --yes`, {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 60000,
+    }).trim();
+
+    const deployUrl = result.split('\n').pop().trim();
+
+    console.log(`  ${c.green}✔${c.reset}  Deployed to Vercel`);
+    console.log('');
+    console.log(`  ${c.green}${c.bold}✔ Update published!${c.reset}`);
+    console.log(`  ${c.dim}URL: ${c.cyan}${deployUrl}${c.reset}`);
+    console.log('');
+    console.log(`  ${c.bold}Configure your app with:${c.reset}`);
+    console.log(`  ${c.dim}LivePatch.configure({${c.reset}`);
+    console.log(`  ${c.dim}  updateUrl: '${deployUrl}'${c.reset}`);
+    console.log(`  ${c.dim}});${c.reset}`);
+
+    // Save config
+    const configPath = path.resolve('.livepatch.json');
+    const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+    config.vercel = { url: deployUrl };
+    config.updateUrl = deployUrl;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+  } catch (err) {
+    console.error(`  ${c.red}✖${c.reset}  Vercel deploy failed: ${err.message.split('\n')[0]}`);
+    process.exit(1);
+  }
+}
+
+async function uploadToCustomServer(serverUrl, outputDir, manifest) {
+  // Upload manifest + bundles via HTTP PUT/POST
+  const files = ['manifest.json'];
+  for (const platform of Object.keys(manifest.bundles)) {
+    files.push(manifest.bundles[platform].filename);
+  }
+
+  for (const filename of files) {
+    const filePath = path.join(outputDir, filename);
+    if (!fs.existsSync(filePath)) continue;
+
+    const content = fs.readFileSync(filePath);
+    const uploadUrl = `${serverUrl}/${filename}`;
+
+    try {
+      execSync(`curl -s -X PUT "${uploadUrl}" --data-binary @"${filePath}" -H "Content-Type: application/octet-stream"`, {
+        stdio: 'pipe',
+        timeout: 60000,
+      });
+      console.log(`  ${c.green}✔${c.reset}  ${filename} uploaded`);
+    } catch (err) {
+      console.error(`  ${c.red}✖${c.reset}  Failed to upload ${filename}`);
+      process.exit(1);
+    }
+  }
+
+  console.log('');
+  console.log(`  ${c.green}${c.bold}✔ Update published!${c.reset}`);
+  console.log(`  ${c.dim}Server: ${serverUrl}${c.reset}`);
+}
+
 function showHelp() {
   console.log('');
   console.log(`  ${c.bold}${c.magenta}🩹 LivePatch${c.reset} — OTA updates for React Native`);
   console.log(`  ${c.dim}Free CodePush alternative. Self-hosted, no cloud dependency.${c.reset}`);
   console.log('');
   console.log(`  ${c.bold}COMMANDS${c.reset}`);
-  console.log(`    ${c.green}push${c.reset}       Bundle JS and create update package`);
-  console.log(`    ${c.green}serve${c.reset}      Start local update server (for testing)`);
+  console.log(`    ${c.green}push${c.reset}       Bundle JS and publish update`);
+  console.log(`    ${c.green}serve${c.reset}      Start local update server (dev/testing)`);
   console.log(`    ${c.green}history${c.reset}    Show push history`);
   console.log(`    ${c.green}rollback${c.reset}   Revert to previous version`);
   console.log('');
   console.log(`  ${c.bold}OPTIONS${c.reset}`);
-  console.log(`    ${c.yellow}--channel, -c <name>${c.reset}  Target channel ${c.dim}(default: production)${c.reset}`);
-  console.log(`    ${c.yellow}--platform, -p <os>${c.reset}   android, ios, or all ${c.dim}(default: all)${c.reset}`);
-  console.log(`    ${c.yellow}--output, -o <dir>${c.reset}    Output directory`);
-  console.log(`    ${c.yellow}--server <url>${c.reset}        Upload to server`);
-  console.log(`    ${c.yellow}--port <number>${c.reset}       Serve port ${c.dim}(default: 4200)${c.reset}`);
+  console.log(`    ${c.yellow}--channel, -c <name>${c.reset}    Target channel ${c.dim}(default: production)${c.reset}`);
+  console.log(`    ${c.yellow}--platform, -p <os>${c.reset}     android, ios, or all ${c.dim}(default: all)${c.reset}`);
+  console.log(`    ${c.yellow}--upload <target>${c.reset}       Upload to: github, vercel, or URL`);
+  console.log(`    ${c.yellow}--output, -o <dir>${c.reset}      Output directory`);
+  console.log(`    ${c.yellow}--port <number>${c.reset}         Serve port ${c.dim}(default: 4200)${c.reset}`);
   console.log('');
   console.log(`  ${c.bold}EXAMPLES${c.reset}`);
-  console.log(`    ${c.dim}$${c.reset} livepatch push`);
-  console.log(`    ${c.dim}$${c.reset} livepatch push --channel staging --platform android`);
-  console.log(`    ${c.dim}$${c.reset} livepatch serve`);
-  console.log(`    ${c.dim}$${c.reset} livepatch history`);
+  console.log(`    ${c.dim}$${c.reset} livepatch push                            ${c.dim}# bundle only${c.reset}`);
+  console.log(`    ${c.dim}$${c.reset} livepatch push --upload github             ${c.dim}# push to GitHub Releases (free)${c.reset}`);
+  console.log(`    ${c.dim}$${c.reset} livepatch push --upload vercel             ${c.dim}# push to Vercel (free)${c.reset}`);
+  console.log(`    ${c.dim}$${c.reset} livepatch push --upload https://my.server  ${c.dim}# push to custom server${c.reset}`);
+  console.log(`    ${c.dim}$${c.reset} livepatch push --channel staging -p android`);
+  console.log(`    ${c.dim}$${c.reset} livepatch serve                            ${c.dim}# local dev server${c.reset}`);
   console.log('');
 }
 
