@@ -1,6 +1,6 @@
 {
   "name": "react-native-livepatch",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Free, self-hosted OTA updates for React Native. Push JS bundle updates instantly. CodePush alternative.",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
