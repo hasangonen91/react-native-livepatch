@@ -93,6 +93,24 @@ livepatch history                       # Show push history
 - **Works offline** — app functions normally without updates
 - **Auto-apply** — or manual control, your choice
 
+## Expo Support
+
+Works with Expo prebuild (bare workflow) and Dev Client. Add to `app.json`:
+
+```json
+{
+  "plugins": ["react-native-livepatch"]
+}
+```
+
+Then run `npx expo prebuild` — the config plugin auto-configures native modules. No manual setup needed.
+
+| Expo Type | Supported |
+|-----------|-----------|
+| Expo prebuild (bare) | ✅ |
+| Expo Dev Client | ✅ |
+| Expo Go | ❌ (use EAS Update) |
+
 ## Native Integration
 
 ### Android (MainApplication.kt):
