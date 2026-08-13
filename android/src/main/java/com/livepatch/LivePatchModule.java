@@ -3,6 +3,7 @@ package com.livepatch;
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Base64;
 
 import androidx.annotation.NonNull;
 
@@ -12,6 +13,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 
 import java.io.File;
+import java.io.FileOutputStream;
 
 /**
  * Native module for LivePatch OTA updates.
@@ -23,6 +25,7 @@ public class LivePatchModule extends ReactContextBaseJavaModule {
     private static final String KEY_BUNDLE_PATH = "active_bundle_path";
     private static final String KEY_PENDING_PATH = "pending_bundle_path";
     private static final String KEY_VERSION = "active_version";
+    private static final String KEY_PENDING_VERSION = "pending_version";
 
     private final ReactApplicationContext reactContext;
 
@@ -35,6 +38,40 @@ public class LivePatchModule extends ReactContextBaseJavaModule {
     @NonNull
     public String getName() {
         return MODULE_NAME;
+    }
+
+    /**
+     * Writes a bundle (base64) to disk and marks it as pending for next launch.
+     */
+    @ReactMethod
+    public void writeBundle(String base64, String version, Promise promise) {
+        try {
+            byte[] data = Base64.decode(base64, Base64.DEFAULT);
+            File dir = getBundleDir();
+            if (!dir.exists()) dir.mkdirs();
+
+            File bundleFile = new File(dir, "livepatch_" + version + ".jsbundle");
+            try (FileOutputStream fos = new FileOutputStream(bundleFile)) {
+                fos.write(data);
+            }
+
+            SharedPreferences prefs = reactContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            prefs.edit()
+                .putString(KEY_PENDING_PATH, bundleFile.getAbsolutePath())
+                .putString(KEY_PENDING_VERSION, version)
+                .putString(KEY_VERSION, version) // mark as current so check skips it
+                .apply();
+
+            promise.resolve(bundleFile.getAbsolutePath());
+        } catch (Exception e) {
+            promise.reject("WRITE_FAILED", "Failed to write bundle: " + e.getMessage(), e);
+        }
+    }
+
+    @ReactMethod
+    public void getActiveVersion(Promise promise) {
+        SharedPreferences prefs = reactContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        promise.resolve(prefs.getString(KEY_VERSION, null));
     }
 
     @ReactMethod
@@ -64,6 +101,7 @@ public class LivePatchModule extends ReactContextBaseJavaModule {
             .remove(KEY_BUNDLE_PATH)
             .remove(KEY_PENDING_PATH)
             .remove(KEY_VERSION)
+            .remove(KEY_PENDING_VERSION)
             .apply();
 
         // Delete downloaded bundles
@@ -84,10 +122,15 @@ public class LivePatchModule extends ReactContextBaseJavaModule {
         SharedPreferences prefs = reactContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         String pending = prefs.getString(KEY_PENDING_PATH, null);
         if (pending != null) {
+            String pendingVersion = prefs.getString(KEY_PENDING_VERSION, null);
             prefs.edit()
                 .putString(KEY_BUNDLE_PATH, pending)
                 .remove(KEY_PENDING_PATH)
+                .remove(KEY_PENDING_VERSION)
                 .apply();
+            if (pendingVersion != null) {
+                prefs.edit().putString(KEY_VERSION, pendingVersion).apply();
+            }
         }
 
         // Restart the activity

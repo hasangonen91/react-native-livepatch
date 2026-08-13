@@ -29,7 +29,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
     throw new Error('LivePatch not configured. Call LivePatch.configure() first.');
   }
 
-  const currentVersion = getCurrentVersion();
+  const currentVersion = await getCurrentVersion();
   const platform = Platform.OS;
   const channel = config.channel || 'production';
 
@@ -66,6 +66,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
 
 /**
  * Downloads the update bundle to the device.
+ * The bundle is fetched, converted to base64 and written to disk by the native module.
  */
 export async function downloadUpdate(onProgress?: (percent: number) => void): Promise<{ success: boolean; path?: string }> {
   const update = await checkForUpdate();
@@ -75,46 +76,32 @@ export async function downloadUpdate(onProgress?: (percent: number) => void): Pr
   }
 
   try {
-    const bundleDir = await LivePatchNative.getBundleDirectory();
-    const downloadPath = `${bundleDir}/livepatch_${update.version}.jsbundle`;
-
-    // Download using fetch + write via native module
     const response = await fetch(update.url);
     if (!response.ok) return { success: false };
 
     const blob = await response.blob();
     const reader = new FileReader();
 
-    await new Promise<void>((resolve, reject) => {
-      reader.onload = async () => {
-        try {
-          // Write bundle via native
-          const base64 = (reader.result as string).split(',')[1];
-          // For now, use a simpler approach — native module handles file writing
-          await LivePatchNative.setBundlePath(update.url!);
-          resolve();
-        } catch (err) {
-          reject(err);
-        }
-      };
+    const base64 = await new Promise<string | null>((resolve, reject) => {
+      reader.onload = () => resolve((reader.result as string).split(',')[1] ?? null);
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(blob);
     });
 
-    // Verify hash if provided
-    if (update.hash) {
-      // Hash verification happens on native side
-    }
+    if (!base64) return { success: false };
+
+    // Write bundle to disk via native module (returns the real file path)
+    const filePath = await LivePatchNative.writeBundle(base64, update.version!);
 
     _pendingUpdate = {
       version: update.version!,
-      path: downloadPath,
+      path: filePath,
       hash: update.hash,
     };
 
     if (onProgress) onProgress(100);
 
-    return { success: true, path: downloadPath };
+    return { success: true, path: filePath };
   } catch {
     return { success: false };
   }
@@ -133,8 +120,6 @@ export function applyUpdate(options: { immediate?: boolean } = {}): void {
   if (immediate) {
     LivePatchNative.restart();
   }
-  // If not immediate, the new bundle will be loaded on next app launch
-  // (native module already has the path set from download)
 }
 
 /**
@@ -142,19 +127,26 @@ export function applyUpdate(options: { immediate?: boolean } = {}): void {
  */
 export async function rollback(): Promise<void> {
   await LivePatchNative.clearBundlePath();
+  _pendingUpdate = null;
   LivePatchNative.restart();
 }
 
 /**
- * Gets the current running version info.
+ * Gets the current running version info (from native storage).
  */
-export function getCurrentVersion(): VersionInfo {
+export async function getCurrentVersion(): Promise<VersionInfo> {
   const config = getConfig();
 
+  // Read active version + bundle path from native storage
+  const [activeVersion, activePath] = await Promise.all([
+    LivePatchNative.getActiveVersion(),
+    LivePatchNative.getActiveBundlePath(),
+  ]);
+
   return {
-    version: _pendingUpdate?.version || '0',
+    version: activeVersion || _pendingUpdate?.version || '0',
     channel: config.channel || 'production',
-    isUpdate: _pendingUpdate !== null,
-    bundlePath: _pendingUpdate?.path,
+    isUpdate: !!activePath,
+    bundlePath: activePath || _pendingUpdate?.path,
   };
 }

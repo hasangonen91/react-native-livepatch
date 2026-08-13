@@ -86,7 +86,7 @@ export const LivePatch = {
   /**
    * Get info about the currently running version.
    */
-  getCurrentVersion(): VersionInfo {
+  async getCurrentVersion(): Promise<VersionInfo> {
     return getCurrentVersion();
   },
 

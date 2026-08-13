@@ -1,0 +1,16 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /Users/hasangonen/Desktop/hasan/bot/serviceOS/serviceOS/node_modules/react-native-livepatch/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest16741963115315795678.xml:2:13-83
+INJECTED from /Users/hasangonen/Desktop/hasan/bot/serviceOS/serviceOS/node_modules/react-native-livepatch/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest16741963115315795678.xml:2:13-83
+	package
+		INJECTED from /Users/hasangonen/Desktop/hasan/bot/serviceOS/serviceOS/node_modules/react-native-livepatch/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest16741963115315795678.xml
+	xmlns:android
+		ADDED from /Users/hasangonen/Desktop/hasan/bot/serviceOS/serviceOS/node_modules/react-native-livepatch/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest16741963115315795678.xml:2:23-81
+uses-sdk
+INJECTED from /Users/hasangonen/Desktop/hasan/bot/serviceOS/serviceOS/node_modules/react-native-livepatch/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest16741963115315795678.xml reason: use-sdk injection requested
+INJECTED from /Users/hasangonen/Desktop/hasan/bot/serviceOS/serviceOS/node_modules/react-native-livepatch/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest16741963115315795678.xml
+INJECTED from /Users/hasangonen/Desktop/hasan/bot/serviceOS/serviceOS/node_modules/react-native-livepatch/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest16741963115315795678.xml
+	android:targetSdkVersion
+		INJECTED from /Users/hasangonen/Desktop/hasan/bot/serviceOS/serviceOS/node_modules/react-native-livepatch/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest16741963115315795678.xml
+	android:minSdkVersion
+		INJECTED from /Users/hasangonen/Desktop/hasan/bot/serviceOS/serviceOS/node_modules/react-native-livepatch/android/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest16741963115315795678.xml
