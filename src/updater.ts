@@ -45,7 +45,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
       return { available: false };
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as any;
 
     if (data.version && data.version !== currentVersion.version) {
       return {

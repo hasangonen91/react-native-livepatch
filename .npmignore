@@ -6,3 +6,8 @@ tests/
 .git/
 src/
 tsconfig.json
+android/build/
+android/.gradle/
+ios/build/
+ios/Pods/
+*.orig

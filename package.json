@@ -1,6 +1,6 @@
 {
   "name": "react-native-livepatch",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "Free, self-hosted OTA updates for React Native. Push JS bundle updates instantly. CodePush alternative.",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -46,7 +46,7 @@
     "react-native": ">=0.70.0"
   },
   "devDependencies": {
-    "@types/react-native": "^0.73.0",
+    "react-native": "^0.87.0",
     "typescript": "^5.9.3"
   },
   "files": [
@@ -56,7 +56,12 @@
     "android/",
     "ios/",
     "app.plugin.js",
-    "react-native-livepatch.podspec"
+    "react-native-livepatch.podspec",
+    "!android/build/**",
+    "!android/.gradle/**",
+    "!ios/build/**",
+    "!ios/Pods/**",
+    "!ios/.xcode.env.local"
   ],
   "expo": {
     "autolinking": {

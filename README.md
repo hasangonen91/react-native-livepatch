@@ -113,13 +113,13 @@ Then run `npx expo prebuild` — the config plugin auto-configures native module
 
 ## Native Integration
 
-### Android (MainApplication.kt):
+### Android (MainApplication.kt — RN 0.86+):
 
 ```kotlin
 import com.livepatch.LivePatchModule
 
 // In getDefaultReactHost:
-jsBundleFilePath = LivePatchModule.getCustomBundlePath(this@MainApplication)
+jsBundleFilePath = LivePatchModule.getBundleUrl(this@MainApplication)
 ```
 
 ### iOS (AppDelegate.swift):
@@ -149,6 +149,10 @@ LivePatch.apply({ immediate: true }); // restart with new bundle
 // Rollback
 await LivePatch.rollback();
 
+// Currently installed version
+const version = await LivePatch.getCurrentVersion();
+// → { activeVersion: '0.4.1', activeBundlePath: '...' }
+
 // Sync (check + download + apply in one call)
 await LivePatch.sync();
 ```
@@ -159,6 +163,13 @@ await LivePatch.sync();
 - HTTPS enforced for production update URLs
 - Rollback on crash detection (if app crashes after update, reverts automatically)
 - No code execution from untrusted sources — only signed bundles
+
+## Privacy
+
+- **Zero telemetry** — LivePatch sends no analytics, no crash reports, nothing
+- **No user data ever leaves your device** — only the update server URL you configure
+- **No accounts, no cloud, no tracking** — package is fully self-contained
+- The only network request is: "is there a new bundle?" → downloads it. That's it.
 
 ## Store Compliance
 
@@ -198,6 +209,21 @@ The rule: you can update JavaScript and assets, but not native code or app purpo
 │  ios.jsbundle        │
 └──────────────────────┘
 ```
+
+## Changelog
+
+### v0.4.1 — 2026-08-13
+- **Fix**: bundle is now actually written to disk via native `writeBundle()` (previous versions only set the download URL — update never applied)
+- **Fix**: `getCurrentVersion()` now reads the real native version, not a stub
+- **Fix**: full RN 0.86 compatibility (`getDefaultReactHost`/`jsBundleFilePath` signature)
+- **Add**: `LivePatchModule.getBundleUrl()` native helper for Android
+- **Add**: version tracking — previous bundle kept for rollback after restart
+- **Add**: `lib/` TypeScript build fully regenerated (ESNext + bundler resolution)
+
+### v0.4.0 — 2026-06-05
+- Initial release: configure, check, download, apply, rollback, sync
+- GitHub/Vercel/static-host upload via `livepatch push --upload`
+- Expo config plugin + Android (Kotlin) + iOS (Swift) native modules
 
 ## License
 
