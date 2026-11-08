@@ -1,99 +1,37 @@
-import { configure, getConfig, LivePatchConfig } from './config';
-import { checkForUpdate, downloadUpdate, applyUpdate, rollback, getCurrentVersion, UpdateInfo, VersionInfo } from './updater';
-import { LivePatchNative } from './native';
+import { useSyncExternalStore } from 'react';
+import { AppState, Platform } from 'react-native';
+import NativeLivePatch from './NativeLivePatch';
+import { LivePatchCore } from './core';
+import type { LivePatchSnapshot } from './types';
 
-export { LivePatchConfig, UpdateInfo, VersionInfo };
-export { LivePatchNativeModule } from './native';
+export * from './types';
+export { supabaseProvider, httpProvider } from './providers';
+export type { SupabaseProviderOptions, HttpProviderOptions } from './providers';
+export { LivePatchCore } from './core';
+
+declare const __DEV__: boolean;
 
 /**
- * LivePatch — Free OTA updates for React Native.
- * CodePush alternative. Self-hosted, no cloud dependency.
+ * OTA updates for React Native.
+ *
+ * ```tsx
+ * import { LivePatch, supabaseProvider } from 'react-native-livepatch';
+ *
+ * useEffect(() => {
+ *   LivePatch.init({ provider: supabaseProvider({ url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY }) });
+ * }, []);
+ * ```
  */
-export const LivePatch = {
-  /**
-   * Configure LivePatch with update server URL and options.
-   * Call once on app startup (e.g., in App.tsx or index.js).
-   *
-   * @example
-   * ```tsx
-   * LivePatch.configure({
-   *   updateUrl: 'https://your-server.com/updates',
-   *   channel: 'production',
-   * });
-   * ```
-   */
-  configure(options: LivePatchConfig): void {
-    configure(options);
-    if (options.checkOnStart !== false) {
-      this.sync();
-    }
-  },
+export const LivePatch = new LivePatchCore({
+  native: NativeLivePatch,
+  platform: Platform.OS === 'ios' ? 'ios' : 'android',
+  isDev: typeof __DEV__ !== 'undefined' && __DEV__,
+  appState: AppState,
+});
 
-  /**
-   * Check if an update is available.
-   * @returns Update info with version, size, and download URL.
-   */
-  async checkForUpdate(): Promise<UpdateInfo> {
-    return checkForUpdate();
-  },
-
-  /**
-   * Download the latest available update.
-   * @param onProgress - Optional callback with download percentage (0-100).
-   */
-  async download(onProgress?: (percent: number) => void): Promise<{ success: boolean; path?: string }> {
-    return downloadUpdate(onProgress);
-  },
-
-  /**
-   * Apply a downloaded update. Restarts the app with the new bundle.
-   * @param options.immediate - If true, restart now. If false, apply on next launch.
-   */
-  apply(options: { immediate?: boolean } = {}): void {
-    applyUpdate(options);
-  },
-
-  /**
-   * Full sync: check → download → apply.
-   * Convenience method that handles the entire update flow.
-   */
-  async sync(options: { immediate?: boolean } = {}): Promise<{ status: string; version?: string; error?: string }> {
-    try {
-      const update = await this.checkForUpdate();
-      if (!update.available) return { status: 'up-to-date' };
-
-      const result = await this.download();
-      if (!result.success) return { status: 'download-failed' };
-
-      if (options.immediate || getConfig().autoApply) {
-        this.apply({ immediate: true });
-        return { status: 'applied', version: update.version };
-      }
-
-      return { status: 'pending', version: update.version };
-    } catch (err: any) {
-      return { status: 'error', error: err.message };
-    }
-  },
-
-  /**
-   * Rollback to the previous bundle version.
-   */
-  async rollback(): Promise<void> {
-    return rollback();
-  },
-
-  /**
-   * Get info about the currently running version.
-   */
-  async getCurrentVersion(): Promise<VersionInfo> {
-    return getCurrentVersion();
-  },
-
-  /**
-   * Access native module directly (advanced use).
-   */
-  native: LivePatchNative,
-};
+/** Live update status for UI (e.g. an "Update ready, restart?" banner). */
+export function useLivePatch(): LivePatchSnapshot {
+  return useSyncExternalStore(LivePatch.subscribe, LivePatch.getSnapshot, LivePatch.getSnapshot);
+}
 
 export default LivePatch;

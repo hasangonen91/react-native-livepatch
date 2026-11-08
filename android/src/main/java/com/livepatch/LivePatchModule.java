@@ -1,179 +1,103 @@
 package com.livepatch;
 
-import android.app.Activity;
-import android.content.Context;
-import android.content.SharedPreferences;
-import android.util.Base64;
-
-import androidx.annotation.NonNull;
-
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
-import com.facebook.react.bridge.ReactContextBaseJavaModule;
-import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.module.annotations.ReactModule;
 
-import java.io.File;
-import java.io.FileOutputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-/**
- * Native module for LivePatch OTA updates.
- * Handles bundle file management, storage, and app restart.
- */
-public class LivePatchModule extends ReactContextBaseJavaModule {
-    private static final String MODULE_NAME = "LivePatchModule";
-    private static final String PREFS_NAME = "livepatch_prefs";
-    private static final String KEY_BUNDLE_PATH = "active_bundle_path";
-    private static final String KEY_PENDING_PATH = "pending_bundle_path";
-    private static final String KEY_VERSION = "active_version";
-    private static final String KEY_PENDING_VERSION = "pending_version";
+@ReactModule(name = LivePatchModule.NAME)
+public class LivePatchModule extends NativeLivePatchSpec {
+  public static final String NAME = "LivePatch";
 
-    private final ReactApplicationContext reactContext;
+  private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
-    public LivePatchModule(ReactApplicationContext context) {
-        super(context);
-        this.reactContext = context;
+  public LivePatchModule(ReactApplicationContext context) {
+    super(context);
+  }
+
+  private LivePatchStore store() {
+    return LivePatchStore.get(getReactApplicationContext());
+  }
+
+  @Override
+  public void getState(Promise promise) {
+    try {
+      promise.resolve(store().snapshot());
+    } catch (Exception e) {
+      promise.reject("LIVEPATCH_STATE", e.getMessage(), e);
     }
+  }
 
-    @Override
-    @NonNull
-    public String getName() {
-        return MODULE_NAME;
-    }
-
-    /**
-     * Writes a bundle (base64) to disk and marks it as pending for next launch.
-     */
-    @ReactMethod
-    public void writeBundle(String base64, String version, Promise promise) {
-        try {
-            byte[] data = Base64.decode(base64, Base64.DEFAULT);
-            File dir = getBundleDir();
-            if (!dir.exists()) dir.mkdirs();
-
-            File bundleFile = new File(dir, "livepatch_" + version + ".jsbundle");
-            try (FileOutputStream fos = new FileOutputStream(bundleFile)) {
-                fos.write(data);
-            }
-
-            SharedPreferences prefs = reactContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            prefs.edit()
-                .putString(KEY_PENDING_PATH, bundleFile.getAbsolutePath())
-                .putString(KEY_PENDING_VERSION, version)
-                .putString(KEY_VERSION, version) // mark as current so check skips it
-                .apply();
-
-            promise.resolve(bundleFile.getAbsolutePath());
-        } catch (Exception e) {
-            promise.reject("WRITE_FAILED", "Failed to write bundle: " + e.getMessage(), e);
-        }
-    }
-
-    @ReactMethod
-    public void getActiveVersion(Promise promise) {
-        SharedPreferences prefs = reactContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        promise.resolve(prefs.getString(KEY_VERSION, null));
-    }
-
-    @ReactMethod
-    public void getActiveBundlePath(Promise promise) {
-        SharedPreferences prefs = reactContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String path = prefs.getString(KEY_BUNDLE_PATH, null);
-        if (path != null && new File(path).exists()) {
-            promise.resolve(path);
-        } else {
-            promise.resolve(null);
-        }
-    }
-
-    @ReactMethod
-    public void setBundlePath(String path, Promise promise) {
-        SharedPreferences prefs = reactContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit()
-            .putString(KEY_PENDING_PATH, path)
-            .apply();
+  @Override
+  public void prepareDownload(String releaseId, Promise promise) {
+    executor.execute(() -> {
+      try {
+        store().prepareDownload(releaseId);
         promise.resolve(null);
-    }
+      } catch (Exception e) {
+        promise.reject("LIVEPATCH_PREPARE", e.getMessage(), e);
+      }
+    });
+  }
 
-    @ReactMethod
-    public void clearBundlePath(Promise promise) {
-        SharedPreferences prefs = reactContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        prefs.edit()
-            .remove(KEY_BUNDLE_PATH)
-            .remove(KEY_PENDING_PATH)
-            .remove(KEY_VERSION)
-            .remove(KEY_PENDING_VERSION)
-            .apply();
+  @Override
+  public void downloadFile(String releaseId, String relativePath, String url, String sha256, Promise promise) {
+    executor.execute(() -> {
+      try {
+        promise.resolve(store().downloadFile(releaseId, relativePath, url, sha256));
+      } catch (SecurityException e) {
+        promise.reject("LIVEPATCH_HASH_MISMATCH", e.getMessage(), e);
+      } catch (Exception e) {
+        promise.reject("LIVEPATCH_DOWNLOAD", e.getMessage(), e);
+      }
+    });
+  }
 
-        // Delete downloaded bundles
-        File bundleDir = getBundleDir();
-        if (bundleDir.exists()) {
-            for (File file : bundleDir.listFiles()) {
-                if (file.getName().startsWith("livepatch_")) {
-                    file.delete();
-                }
-            }
-        }
+  @Override
+  public void commitDownload(String releaseId, String bundlePath, Promise promise) {
+    executor.execute(() -> {
+      try {
+        store().commitDownload(releaseId, bundlePath);
         promise.resolve(null);
-    }
+      } catch (Exception e) {
+        promise.reject("LIVEPATCH_COMMIT", e.getMessage(), e);
+      }
+    });
+  }
 
-    @ReactMethod
-    public void restart() {
-        // Promote pending to active
-        SharedPreferences prefs = reactContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String pending = prefs.getString(KEY_PENDING_PATH, null);
-        if (pending != null) {
-            String pendingVersion = prefs.getString(KEY_PENDING_VERSION, null);
-            prefs.edit()
-                .putString(KEY_BUNDLE_PATH, pending)
-                .remove(KEY_PENDING_PATH)
-                .remove(KEY_PENDING_VERSION)
-                .apply();
-            if (pendingVersion != null) {
-                prefs.edit().putString(KEY_VERSION, pendingVersion).apply();
-            }
-        }
+  @Override
+  public void discardDownload(String releaseId, Promise promise) {
+    executor.execute(() -> {
+      store().discardDownload(releaseId);
+      promise.resolve(null);
+    });
+  }
 
-        // Restart the activity
-        Activity activity = getCurrentActivity();
-        if (activity != null) {
-            activity.recreate();
-        }
+  @Override
+  public void notifyAppReady(Promise promise) {
+    try {
+      promise.resolve(store().notifyAppReady());
+    } catch (Exception e) {
+      promise.reject("LIVEPATCH_READY", e.getMessage(), e);
     }
+  }
 
-    @ReactMethod
-    public void getAppVersion(Promise promise) {
-        try {
-            String version = reactContext.getPackageManager()
-                .getPackageInfo(reactContext.getPackageName(), 0)
-                .versionName;
-            promise.resolve(version);
-        } catch (Exception e) {
-            promise.resolve("unknown");
-        }
-    }
+  @Override
+  public void resetToEmbedded(Promise promise) {
+    store().resetToEmbedded();
+    promise.resolve(null);
+  }
 
-    @ReactMethod
-    public void getBundleDirectory(Promise promise) {
-        File dir = getBundleDir();
-        if (!dir.exists()) dir.mkdirs();
-        promise.resolve(dir.getAbsolutePath());
-    }
+  @Override
+  public void restart() {
+    LivePatchRestartActivity.restart(getReactApplicationContext());
+  }
 
-    private File getBundleDir() {
-        return new File(reactContext.getFilesDir(), "livepatch_bundles");
-    }
-
-    /**
-     * Called by the app's ReactNativeHost to get the custom bundle path.
-     * Usage in MainApplication:
-     *   LivePatchModule.getBundleUrl(this)
-     */
-    public static String getBundleUrl(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String path = prefs.getString(KEY_BUNDLE_PATH, null);
-        if (path != null && new File(path).exists()) {
-            return path;
-        }
-        return null; // Use default bundle
-    }
+  @Override
+  public void invalidate() {
+    executor.shutdown();
+    super.invalidate();
+  }
 }

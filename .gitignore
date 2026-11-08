@@ -1,1 +1,8 @@
 node_modules/
+lib/
+android/build/
+android/.gradle/
+ios/build/
+*.tgz
+.livepatch/
+tests/.build/
