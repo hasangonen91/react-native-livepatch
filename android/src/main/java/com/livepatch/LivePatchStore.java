@@ -184,7 +184,9 @@ final class LivePatchStore {
     File stagingRoot = new File(stagingDir(), id);
     File dest = safeChild(stagingRoot, relativePath);
     File parent = dest.getParentFile();
-    if (parent != null && !parent.exists() && !parent.mkdirs()) {
+    // Files are downloaded in parallel: another worker may create the same
+    // directory between the checks, so only fail if it still isn't there.
+    if (parent != null && !parent.mkdirs() && !parent.isDirectory()) {
       throw new IOException("Cannot create " + parent);
     }
     String expected = sha256.toLowerCase();
