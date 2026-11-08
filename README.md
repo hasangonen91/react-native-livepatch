@@ -1,241 +1,154 @@
-# 🩹 LivePatch
+# react-native-livepatch
 
-[![npm version](https://img.shields.io/npm/v/react-native-livepatch.svg)](https://npmjs.com/package/react-native-livepatch)
-[![license](https://img.shields.io/npm/l/react-native-livepatch.svg)](https://github.com/hasangonen91/react-native-livepatch/blob/main/LICENSE)
+Self-hosted over-the-air (OTA) updates for React Native. Ship JavaScript and asset changes to users without a store release, from your own Supabase project.
 
-### CodePush is dead. This is the free replacement.
+- **Crash-safe**: a new bundle runs on trial. If the app dies before it is confirmed, the next launch rolls back automatically and the release is never installed on that device again.
+- **Binary-aware**: every release targets one native app version (e.g. `3.1.1`). A store update automatically discards older OTA bundles.
+- **Assets included**: images and other assets ship with the bundle; unchanged files are reused from the previous release, not downloaded again.
+- **Verified**: every file is checked against its SHA-256 before it is installed.
+- **Rollout control**: staged rollouts (percent of devices), mandatory updates, and instant server-side rollback (`livepatch disable <id>`).
+- **Stats**: installs, crashes-rolled-back and download failures per release.
+- **New architecture**: TurboModule, works bridgeless (RN 0.76+).
+- **Hermes**: the CLI compiles bundles to Hermes bytecode with the project's own `hermesc`.
 
-Push JavaScript updates to your React Native app instantly. No rebuild, no app store review, no cloud dependency.
+> OTA updates can only change JavaScript and assets. New native modules, permissions or native config still need a store release. Apple allows interpreted-code updates that don't change the app's primary purpose (App Store Review Guideline 3.3.1(b) / 4.7).
 
-## CodePush shut down. Now what?
+## 1. Install
 
-Microsoft killed CodePush in March 2025. Your options:
-
-| Solution | Cost | Self-hosted | Bare RN | No account |
-|----------|------|-------------|---------|------------|
-| ~~CodePush~~ | Dead | — | — | — |
-| EAS Update | Paid tiers | ❌ | ⚠️ needs Expo | ❌ |
-| Shorebird | Paid | ❌ | Limited | ❌ |
-| **LivePatch** | **Free** | **✅** | **✅** | **✅** |
-
-## Install
-
-```bash
+```sh
 yarn add react-native-livepatch
+cd ios && pod install
 ```
 
-## Quick Start
+## 2. Backend (once)
 
-### 1. In your app (2 lines):
+Run the SQL in the Supabase SQL editor (or add it as a migration):
 
-```tsx
-import { LivePatch } from 'react-native-livepatch';
-
-LivePatch.configure({
-  updateUrl: 'https://your-server.com/updates',
-  channel: 'production',
-});
+```sh
+npx livepatch sql > supabase/migrations/20260101000000_livepatch.sql
 ```
 
-App checks for updates on launch. If available, downloads and applies automatically.
+It creates `livepatch_releases`, `livepatch_events` (RLS on, not readable by clients), two RPC functions the app calls with the anon key, and a public storage bucket `livepatch` where files are stored by hash.
 
-### 2. Push an update (1 command):
+## 3. Native setup
 
-```bash
-npx livepatch push --upload github
-```
+The app must ask LivePatch which bundle to load. Keep Metro for debug builds.
 
-Done. All users get the update on next app open.
+**iOS** (`AppDelegate.swift`):
 
-## How It Works
+```swift
+import ReactNativeLivePatch
 
-```
-You change code → livepatch push → users open app → new code running
-                                    (no store update needed)
-```
-
-1. `livepatch push` bundles your JS and uploads to hosting
-2. App launches → checks update server → downloads new bundle
-3. App restarts with new code — instant, seamless
-
-## Upload Options
-
-```bash
-livepatch push --upload github      # GitHub Releases (free, unlimited)
-livepatch push --upload vercel      # Vercel (free tier)
-livepatch push --upload https://s3.amazonaws.com/my-bucket  # Any server
-livepatch push                      # Bundle only (upload manually)
-```
-
-**No paid service needed.** GitHub Releases is free and handles unlimited downloads.
-
-## Commands
-
-```bash
-livepatch push                          # Bundle + prepare update
-livepatch push --upload github          # Bundle + publish to GitHub
-livepatch push --channel staging        # Push to staging channel
-livepatch push --platform android       # Android only
-livepatch serve                         # Local dev server (testing)
-livepatch history                       # Show push history
-```
-
-## Features
-
-- **Free forever** — no paid tiers, no limits, no accounts
-- **Self-hosted** — GitHub Releases, Vercel, S3, any static host
-- **TypeScript** — full type definitions included
-- **Native modules** — Android (Kotlin) + iOS (Swift)
-- **Channel-based** — push different updates to dev/staging/production
-- **Integrity verification** — SHA-256 hash check on every bundle
-- **Rollback** — revert to previous version instantly
-- **Tiny** — 13 KB package size, no heavy dependencies
-- **Works offline** — app functions normally without updates
-- **Auto-apply** — or manual control, your choice
-
-## Expo Support
-
-Works with Expo prebuild (bare workflow) and Dev Client. Add to `app.json`:
-
-```json
-{
-  "plugins": ["react-native-livepatch"]
+override func bundleURL() -> URL? {
+#if DEBUG
+  RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
+#else
+  LivePatchBundle.bundleURL() ?? Bundle.main.url(forResource: "main", withExtension: "jsbundle")
+#endif
 }
 ```
 
-Then run `npx expo prebuild` — the config plugin auto-configures native modules. No manual setup needed.
-
-| Expo Type | Supported |
-|-----------|-----------|
-| Expo prebuild (bare) | ✅ |
-| Expo Dev Client | ✅ |
-| Expo Go | ❌ (use EAS Update) |
-
-## Native Integration
-
-### Android (MainApplication.kt — RN 0.86+):
+**Android** (`MainApplication.kt`):
 
 ```kotlin
-import com.livepatch.LivePatchModule
+import com.livepatch.LivePatchBundle
 
-// In getDefaultReactHost:
-jsBundleFilePath = LivePatchModule.getBundleUrl(this@MainApplication)
+override val reactHost: ReactHost by lazy {
+  getDefaultReactHost(
+    context = applicationContext,
+    packageList = PackageList(this).packages,
+    jsBundleFilePath = if (BuildConfig.DEBUG) null else LivePatchBundle.getJSBundleFile(applicationContext),
+  )
+}
 ```
 
-### iOS (AppDelegate.swift):
+## 4. JavaScript
 
-```swift
-import LivePatchModule
-
-// In sourceURL:
-return LivePatchModule.bundleURL() ?? Bundle.main.url(forResource: "main", withExtension: "jsbundle")
-```
-
-## API
+Call `init` once, after the first screen has rendered:
 
 ```tsx
-import { LivePatch } from 'react-native-livepatch';
+import { LivePatch, supabaseProvider } from 'react-native-livepatch';
 
-// Configure (once on startup)
-LivePatch.configure({ updateUrl: '...', channel: 'production' });
-
-// Manual control
-const update = await LivePatch.checkForUpdate();
-// → { available: true, version: '2026.6.5', size: 983040 }
-
-await LivePatch.download((percent) => console.log(percent + '%'));
-LivePatch.apply({ immediate: true }); // restart with new bundle
-
-// Rollback
-await LivePatch.rollback();
-
-// Currently installed version
-const version = await LivePatch.getCurrentVersion();
-// → { activeVersion: '0.4.1', activeBundlePath: '...' }
-
-// Sync (check + download + apply in one call)
-await LivePatch.sync();
+useEffect(() => {
+  LivePatch.init({
+    provider: supabaseProvider({ url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY }),
+    channel: 'production',
+    installMode: 'onNextResume',        // or 'onNextRestart' (default) / 'immediate'
+    minimumBackgroundDurationMs: 60_000,
+  });
+}, []);
 ```
 
-## Security
+`init` confirms the running bundle (`notifyAppReady`), checks for updates, and checks again when the app returns to the foreground. Mandatory releases install immediately.
 
-- Bundle integrity verified with SHA-256 hash before applying
-- HTTPS enforced for production update URLs
-- Rollback on crash detection (if app crashes after update, reverts automatically)
-- No code execution from untrusted sources — only signed bundles
+Optional UI:
 
-## Privacy
-
-- **Zero telemetry** — LivePatch sends no analytics, no crash reports, nothing
-- **No user data ever leaves your device** — only the update server URL you configure
-- **No accounts, no cloud, no tracking** — package is fully self-contained
-- The only network request is: "is there a new bundle?" → downloads it. That's it.
-
-## Store Compliance
-
-- **Google Play** ✅ — allows JS/asset updates without review (no native code changes)
-- **Apple App Store** ✅ — same policy, CodePush used this for years without issues
-
-The rule: you can update JavaScript and assets, but not native code or app purpose.
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────┐
-│  Your App                                        │
-│  ┌────────────────────────────────────────────┐  │
-│  │  LivePatch SDK (JS)                        │  │
-│  │  - Check for updates                       │  │
-│  │  - Download bundle                         │  │
-│  │  - Trigger restart                         │  │
-│  └─────────────┬──────────────────────────────┘  │
-│                │                                  │
-│  ┌─────────────▼──────────────────────────────┐  │
-│  │  Native Module (Kotlin/Swift)              │  │
-│  │  - Store bundle on filesystem              │  │
-│  │  - Override bundle path on next launch     │  │
-│  │  - Restart app                             │  │
-│  └────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────┘
-         │
-         ▼
-┌──────────────────────┐
-│  Update Server       │
-│  (GitHub / Vercel /  │
-│   S3 / your server)  │
-│                      │
-│  manifest.json       │
-│  android.jsbundle    │
-│  ios.jsbundle        │
-└──────────────────────┘
+```tsx
+const { phase, progress, pendingMessage } = useLivePatch();
+if (phase === 'ready_to_restart') {
+  // show "Update ready" and call LivePatch.restart()
+}
 ```
 
-## Changelog
+| Method | |
+|---|---|
+| `LivePatch.init(config)` | configure and start |
+| `LivePatch.sync({ installMode? })` | check, download, install |
+| `LivePatch.checkForUpdate()` | check only |
+| `LivePatch.notifyAppReady()` | confirm the running bundle (done by `init` unless `autoNotifyAppReady: false`) |
+| `LivePatch.restart()` | reload now |
+| `LivePatch.resetToEmbedded()` | drop OTA bundles, use the store bundle after restart |
+| `LivePatch.getState()` | app version, running release id, pending id, failed ids |
+| `useLivePatch()` | `{ phase, progress, pendingReleaseId, pendingMessage, mandatory, error }` |
 
-### v0.4.1 — 2026-08-13
-- **Fix**: bundle is now actually written to disk via native `writeBundle()` (previous versions only set the download URL — update never applied)
-- **Fix**: `getCurrentVersion()` now reads the real native version, not a stub
-- **Fix**: full RN 0.86 compatibility (`getDefaultReactHost`/`jsBundleFilePath` signature)
-- **Add**: `LivePatchModule.getBundleUrl()` native helper for Android
-- **Add**: version tracking — previous bundle kept for rollback after restart
-- **Add**: `lib/` TypeScript build fully regenerated (ESNext + bundler resolution)
+## 5. Publish
 
-### v0.4.0 — 2026-06-05
-- Initial release: configure, check, download, apply, rollback, sync
-- GitHub/Vercel/static-host upload via `livepatch push --upload`
-- Expo config plugin + Android (Kotlin) + iOS (Swift) native modules
+Credentials for the CLI only (never put the service role key in the app). Use env vars or a git-ignored `.env.livepatch`:
+
+```sh
+SUPABASE_URL=https://xxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+```sh
+npx livepatch release -m "Fix booking button"            # iOS + Android
+npx livepatch release -p ios --rollout 10                 # 10% of iOS devices
+npx livepatch release --mandatory -m "Critical fix"
+npx livepatch release --dry-run                           # build only
+npx livepatch list                                        # releases + stats
+npx livepatch rollout <id> 100
+npx livepatch disable <id>                                # instant rollback
+```
+
+The app version is read from `android/app/build.gradle` and the Xcode project; override with `--app-version`. Always bump the app version for store builds that change native code, so OTA releases built for one binary never reach another.
+
+## How it works
+
+```
+release:  react-native bundle -> hermesc -> sha256 every file -> upload new files -> insert release row
+device:   rpc livepatch_check(platform, appVersion, channel, runningId, deviceId)
+          -> download changed files, verify sha256 -> stage -> "pending"
+launch:   pending -> trial (runs) -> notifyAppReady() -> current
+          trial still set on next launch -> crashed -> rollback to previous, mark failed
+```
+
+Releases select by `platform + app_version + channel`, newest enabled first, with `rollout` decided per device by a stable hash. A device whose running release was disabled is sent back to the store bundle.
+
+### Custom backend
+
+`httpProvider({ checkUrl })` talks to any server that returns
+
+```json
+{ "status": "update", "release": { "id": "…", "bundlePath": "main.jsbundle", "mandatory": false,
+  "files": [{ "path": "main.jsbundle", "sha256": "…", "size": 123, "url": "https://…" }] } }
+```
+
+or `{ "status": "up_to_date" }` / `{ "status": "rollback" }`.
+
+## Migrating from 0.x
+
+1.0 is a rewrite. `LivePatch.configure({ updateUrl })` is replaced by `LivePatch.init({ provider })`, the native hooks are `LivePatchBundle.bundleURL()` (iOS) and `LivePatchBundle.getJSBundleFile(context)` (Android), and `livepatch push` is replaced by `livepatch release`. The Expo config plugin was removed for now.
 
 ## License
 
 MIT
-
-## Author
-
-**Hasan Gönen** — [@hasangonen91](https://github.com/hasangonen91)
-
-- [LinkedIn](https://www.linkedin.com/in/hasangonen91/)
-- [npm](https://www.npmjs.com/~hasangonen91)
-
----
-
-*Also check out [react-native-starship](https://www.npmjs.com/package/react-native-starship) — wireless deploy for React Native (QR scan → install → running).*

@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "./tests/.build", "declaration": false, "rootDir": "./src" },
+  "include": ["src/core.ts", "src/providers.ts", "src/types.ts", "src/NativeLivePatch.ts"]
+}

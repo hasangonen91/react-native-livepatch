@@ -1,7 +1,7 @@
 {
   "name": "react-native-livepatch",
-  "version": "0.4.2",
-  "description": "Free, self-hosted OTA updates for React Native. Push JS bundle updates instantly. CodePush alternative.",
+  "version": "1.0.0",
+  "description": "Self-hosted OTA updates for React Native with crash-safe rollback, staged rollouts and a Supabase backend. CodePush alternative.",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "bin": {
@@ -9,8 +9,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "tsc",
-    "test": "node --test tests/**/*.test.js"
+    "prepare": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test tests/*.test.js"
   },
   "keywords": [
     "react-native",
@@ -24,12 +25,10 @@
     "live-patch",
     "bundle-update",
     "self-hosted",
-    "free",
-    "no-cloud",
     "react-native-plugin",
-    "expo",
-    "expo-plugin",
-    "config-plugin"
+    "supabase",
+    "turbomodule",
+    "new-architecture"
   ],
   "repository": {
     "type": "git",
@@ -43,29 +42,37 @@
   "license": "MIT",
   "peerDependencies": {
     "react": ">=18.0.0",
-    "react-native": ">=0.70.0"
+    "react-native": ">=0.76.0"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
     "react-native": "^0.87.0",
     "typescript": "^5.9.3"
   },
   "files": [
     "lib/",
-    "bin/",
     "src/",
-    "android/",
+    "cli/",
+    "bin/",
+    "android/build.gradle",
+    "android/src/",
     "ios/",
-    "app.plugin.js",
+    "supabase/",
     "react-native-livepatch.podspec",
-    "!android/build/**",
-    "!android/.gradle/**",
-    "!ios/build/**",
-    "!ios/Pods/**",
-    "!ios/.xcode.env.local"
+    "README.md"
   ],
-  "expo": {
-    "autolinking": {
-      "nativeModulesDir": "."
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "codegenConfig": {
+    "name": "LivePatchSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.livepatch"
     }
   }
 }
